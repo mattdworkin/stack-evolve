@@ -53,3 +53,24 @@ python cli.py convert sample_apps/flask_simple --out out_fastapi
 This command will eventually convert supported Flask patterns into a FastAPI application and generate a migration report.
 
 Currently, both commands serve as CLI placeholders to confirm the command interface is functioning.
+
+## Running Tests (Placeholder)
+
+The project includes a `tests/` directory intended for unit tests. At the moment, this test suite only contains placeholder tests to confirm that the testing setup is working correctly.
+
+### Install pytest
+
+If you do not already have pytest installed, install it with:
+
+```bash
+pip install pytest
+```
+### Run the tests
+
+From the root of the project directory, run:
+
+```bash
+pytest
+```
+
+Since the current tests are placeholders, they are only meant to verify that the testing framework is configured correctly. More meaningful tests will be added as the detector, analyzer, and converter modules are implemented.
