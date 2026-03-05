@@ -2,12 +2,15 @@
 Adaptive enterprise tech stack evaluation and automated Flask-to-FastAPI migration modeling platform.
 
 ## Project Setup
-
+### Cloning repo
+```bash
+git clone https://github.com/mattdworkin/stack-evolve
+```
 ### Requirements
 
 - Python 3.9+ recommended
 
-Install required dependency:
+After cloning, install required dependency:
 
 ```bash
 pip install typer
