@@ -1,10 +1,26 @@
 # Implement for Checkpoint 2
 
-
 from pathlib import Path
 import ast
 
 def is_flask_app(repo_path: str) -> bool:
+    """Detect whether a Python app/repository uses Flask imports via AST parsing.
+
+    The function scans a single Python file or all ``.py`` files under a
+    directory, parses each file with ``ast.parse``, and checks for import nodes
+    that reference ``flask`` (for example ``import flask`` or
+    ``from flask import Flask``).
+
+    Args:
+        repo_path: Path to a Python file or repository directory to inspect.
+
+    Returns:
+        True if any parsed file imports Flask; otherwise False.
+
+    Raises:
+        FileNotFoundError: If ``repo_path`` does not exist.
+    """
+
     root = Path(repo_path)
 
     # if no path, eror
