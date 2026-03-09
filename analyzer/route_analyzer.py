@@ -4,9 +4,7 @@ import ast
 from pathlib import Path
 from typing import Any
 
-
 RouteInfo = dict[str, Any]
-
 
 def analyze_flask_routes(repo_path: str | Path) -> list[RouteInfo]:
     """Extract Flask routes from a Python file or repository."""

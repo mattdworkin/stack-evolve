@@ -28,6 +28,19 @@ tests/      # Unit tests
 
 The CLI can be executed using Python.
 
+### Detect a repository
+```
+python cli.py detect <repo_path>
+```
+
+Use this to test sample_application in repo:
+
+```bash
+python cli.py detect sample_apps/flask_simple
+```
+
+This command checks whether a repository/file imports Flask and reports whether it is a Flask application.
+
 ### Analyze a repository
 ```
 python cli.py analyze <repo_path>
@@ -39,7 +52,7 @@ Use this to test sample_application in repo:
 python cli.py analyze sample_apps/flask_simple
 ```
 
-This command will eventually analyze a repository to detect whether it is a Flask application and extract route information.
+This command analyzes a Flask repository and outputs structured route information.
 
 ### Convert a Repository
 ```
@@ -52,7 +65,7 @@ python cli.py convert sample_apps/flask_simple --out out_fastapi
 ```
 This command will eventually convert supported Flask patterns into a FastAPI application and generate a migration report.
 
-Currently, both commands serve as CLI placeholders to confirm the command interface is functioning.
+Currently, `convert` serves as a CLI placeholder to confirm the command interface is functioning.
 
 ## Running Tests (Placeholder)
 
