@@ -70,7 +70,7 @@ pip install pytest
 From the root of the project directory, run:
 
 ```bash
-pytest
+python -m pytest
 ```
 
 Since the current tests are placeholders, they are only meant to verify that the testing framework is configured correctly. More meaningful tests will be added as the detector, analyzer, and converter modules are implemented.
