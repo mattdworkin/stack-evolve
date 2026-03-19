@@ -10,10 +10,10 @@ git clone https://github.com/mattdworkin/stack-evolve
 
 - Python 3.9+ recommended
 
-After cloning, install required dependency:
+After cloning, install required dependencies:
 
 ```bash
-pip install typer
+python3 -m pip install typer pytest
 ```
 ## Project Structure
 The project is organized into the following folders:
@@ -21,7 +21,7 @@ The project is organized into the following folders:
 detector/   # Logic for detecting whether a repository uses Flask
 analyzer/   # Code that analyzes Flask applications and extracts routes
 converter/  # Future module for converting Flask code to FastAPI
-report/     # Future module for generating migration reports
+report/     # Generates migration output artifacts and reports
 tests/      # Unit tests
 ```
 ## Running the CLI
@@ -56,34 +56,57 @@ This command analyzes a Flask repository and outputs structured route informatio
 
 ### Convert a Repository
 ```
-python cli.py convert <repo_path> --out <output_directory>
+python3 cli.py convert <repo_path> --out <output_directory>
 ```
 Use this to test sample_application in repo:
 
 ```bash
-python cli.py convert sample_apps/flask_simple --out out_fastapi
+python3 cli.py convert sample_apps/flask_simple --out out_fastapi
 ```
-This command will eventually convert supported Flask patterns into a FastAPI application and generate a migration report.
+This command now runs the full pipeline:
 
-Currently, `convert` serves as a CLI placeholder to confirm the command interface is functioning.
+```text
+detector -> analyzer -> converter -> generator
+```
 
-## Running Tests (Placeholder)
+It writes stage artifacts and generated output into the target directory. For the sample app, the output directory will contain:
 
-The project includes a `tests/` directory intended for unit tests.
+```text
+out_fastapi/
+  detection.json
+  analysis.json
+  conversion_plan.json
+  generation_summary.json
+  app.py
+  migration_report.json
+```
 
-### Install pytest
-
-If you do not already have pytest installed, install it with:
+To test the non-Flask failure path:
 
 ```bash
-pip install pytest
+python3 cli.py convert sample_apps/non_flask_simple/app.py --out out_fastapi
 ```
+
+That command should exit with code `1`, write `detection.json`, and stop before analysis.
+
+## Running Tests
+
 ### Run the tests
 
 From the root of the project directory, run:
 
 ```bash
-python -m pytest
+python3 -m pytest
 ```
 
-Current tests that exist are for detect and analyze.
+To run only the new convert pipeline tests:
+
+```bash
+python3 -m pytest tests/test_cli_convert.py
+```
+
+To run the related detector, analyzer, and convert tests together:
+
+```bash
+python3 -m pytest tests/test_cli_convert.py tests/test_detector.py tests/test_route_analyzer.py
+```
