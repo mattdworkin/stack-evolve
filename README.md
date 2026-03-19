@@ -84,7 +84,7 @@ out_fastapi/
 To test the non-Flask failure path:
 
 ```bash
-python3 cli.py convert sample_apps/non_flask_simple/app.py --out out_non_flask
+python3 cli.py convert sample_apps/non_flask_simple/app.py --out out_fastapi
 ```
 
 That command should exit with code `1`, write `detection.json`, and stop before analysis.
