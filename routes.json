@@ -1,0 +1,8 @@
+[
+  {
+    "path": "/users",
+    "methods": ["GET"],
+    "handler": "get_users",
+    "file": "app.py"
+  }
+]
