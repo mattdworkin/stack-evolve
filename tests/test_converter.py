@@ -1,6 +1,8 @@
 from pathlib import Path
+import ast
 
 from analyzer.route_analyzer import analyze_flask_routes
+import converter.flask_to_fastapi as flask_to_fastapi
 from converter.flask_to_fastapi import convert_flask_to_fastapi
 
 
@@ -14,20 +16,22 @@ def test_convert_flask_to_fastapi_preserves_basic_sample_behavior():
 
     assert conversion_plan["routes"] == [
         {
-            "source_path": "/health",
+            "original_path": "/health",
             "fastapi_path": "/health",
             "methods": ["GET"],
             "handler": "health",
-            "file": "app.py",
-            "issues": [],
+            "converted_code": '@app.get("/health")\ndef health():\n    return {\'ok\': True}',
+            "converted": True,
+            "unsupported": [],
         },
         {
-            "source_path": "/users/<int:user_id>",
+            "original_path": "/users/<int:user_id>",
             "fastapi_path": "/users/{user_id}",
             "methods": ["GET"],
             "handler": "get_user",
-            "file": "app.py",
-            "issues": [],
+            "converted_code": '@app.get("/users/{user_id}")\ndef get_user(user_id: int, q: Optional[str] = None):\n    if user_id < 0:\n        raise HTTPException(status_code=404)\n    return JSONResponse(content={\'user_id\': user_id, \'q\': q}, status_code=200)',
+            "converted": True,
+            "unsupported": [],
         },
     ]
     assert "def health():" in generated_app
@@ -62,21 +66,63 @@ def test_convert_flask_to_fastapi_with_mock_routes_input():
 
     assert conversion_plan["routes"] == [
         {
-            "source_path": "/users/<int:id>",
+            "original_path": "/users/<int:id>",
             "fastapi_path": "/users/{id}",
             "methods": ["GET"],
             "handler": "get_user",
-            "file": "app.py",
-            "issues": [],
+            "converted_code": '@app.get("/users/{id}")\ndef get_user(user_id, q: Optional[str] = None):\n    if user_id < 0:\n        raise HTTPException(status_code=404)\n    return JSONResponse(content={\'user_id\': user_id, \'q\': q}, status_code=200)',
+            "converted": True,
+            "unsupported": [],
         },
         {
-            "source_path": "/users",
+            "original_path": "/users",
             "fastapi_path": "/users",
             "methods": ["POST"],
             "handler": "create_user",
-            "file": "app.py",
-            "issues": ["Handler body was not found; inserted a stub body."],
+            "converted_code": '@app.post("/users")\ndef create_user():\n    # TODO(migration): unsupported pattern\n    return {"status": "stub"}',
+            "converted": False,
+            "unsupported": ["missing handler body"],
         },
     ]
     assert '@app.get("/users/{id}")' in generated_app
     assert "@app.post(\"/users\")" in generated_app
+
+
+def test_convert_flask_to_fastapi_marks_unsupported_patterns(monkeypatch):
+    handler_source = "\n".join(
+        [
+            "def submit_form():",
+            '    name = request.form.get("name")',
+            '    return jsonify({"name": name})',
+        ]
+    )
+    handler_node = ast.parse(handler_source).body[0]
+
+    def fake_build_handler_index(search_root, routes):
+        return {("app.py", "submit_form"): handler_node}
+
+    monkeypatch.setattr(flask_to_fastapi, "_build_handler_index", fake_build_handler_index)
+
+    conversion_plan = convert_flask_to_fastapi(
+        "sample_apps/flask_simple",
+        [
+            {
+                "path": "/submit",
+                "methods": ["POST"],
+                "handler": "submit_form",
+                "file": "app.py",
+            }
+        ],
+    )
+
+    assert conversion_plan["routes"] == [
+        {
+            "original_path": "/submit",
+            "fastapi_path": "/submit",
+            "methods": ["POST"],
+            "handler": "submit_form",
+            "converted_code": '@app.post("/submit")\ndef submit_form():\n    # TODO(migration): unsupported pattern\n    name = request.form.get(\'name\')\n    return {\'name\': name}',
+            "converted": False,
+            "unsupported": ["request.form"],
+        }
+    ]

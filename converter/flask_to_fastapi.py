@@ -25,7 +25,7 @@ def convert_flask_to_fastapi(
     repo_path: str | Path,
     routes: list[RouteInfo],
 ) -> ConversionPlan:
-    """Build a basic Flask-to-FastAPI conversion plan."""
+    """Build a Flask-to-FastAPI conversion plan using the shared route contract."""
 
     source_root = Path(repo_path)
     search_root = source_root if source_root.is_dir() else source_root.parent
@@ -46,7 +46,7 @@ def convert_flask_to_fastapi(
         uses_http_exception = uses_http_exception or converted_route["uses_http_exception"]
         uses_json_response = uses_json_response or converted_route["uses_json_response"]
         uses_optional = uses_optional or converted_route["uses_optional"]
-        notes.extend(converted_route["issues"])
+        notes.extend(converted_route["unsupported"])
 
     generated_app = _build_fastapi_app(
         converted_routes,
@@ -60,12 +60,13 @@ def convert_flask_to_fastapi(
         "route_count": len(converted_routes),
         "routes": [
             {
-                "source_path": route["source_path"],
+                "original_path": route["original_path"],
                 "fastapi_path": route["fastapi_path"],
                 "methods": route["methods"],
                 "handler": route["handler"],
-                "file": route.get("file"),
-                "issues": route["issues"],
+                "converted_code": route["converted_code"],
+                "converted": route["converted"],
+                "unsupported": route["unsupported"],
             }
             for route in converted_routes
         ],
@@ -100,24 +101,32 @@ def _convert_route(
     route: RouteInfo,
     handler_node: ast.FunctionDef | ast.AsyncFunctionDef | None,
 ) -> RouteInfo:
-    fastapi_path, path_params, path_issues = _convert_flask_path(route["path"])
+    fastapi_path, path_params, path_unsupported = _convert_flask_path(route["path"])
     query_params = _extract_query_params(handler_node)
     signature, uses_optional = _build_signature(handler_node, path_params, query_params)
-    body_lines, body_issues, uses_http_exception, uses_json_response = _build_function_body(
+    body_lines, body_unsupported, uses_http_exception, uses_json_response = _build_function_body(
         handler_node,
         query_params,
     )
+    unsupported = _unique_strings(path_unsupported + body_unsupported)
+    converted = not unsupported
+    converted_code = _build_route_code(
+        fastapi_path,
+        route["methods"],
+        route["handler"],
+        signature,
+        body_lines,
+        isinstance(handler_node, ast.AsyncFunctionDef),
+    )
 
     return {
-        "source_path": route["path"],
+        "original_path": route["path"],
         "fastapi_path": fastapi_path,
         "methods": route["methods"],
         "handler": route["handler"],
-        "file": route.get("file"),
-        "signature": signature,
-        "body_lines": body_lines,
-        "is_async": isinstance(handler_node, ast.AsyncFunctionDef),
-        "issues": _unique_strings(path_issues + body_issues),
+        "converted_code": converted_code,
+        "converted": converted,
+        "unsupported": unsupported,
         "uses_http_exception": uses_http_exception,
         "uses_json_response": uses_json_response,
         "uses_optional": uses_optional,
@@ -125,20 +134,18 @@ def _convert_route(
 
 
 def _convert_flask_path(flask_path: str) -> tuple[str, dict[str, str], list[str]]:
-    issues: list[str] = []
+    unsupported: list[str] = []
     path_params: dict[str, str] = {}
 
     def _replace(match: re.Match[str]) -> str:
         converter = match.group("converter")
         param_name = match.group("name")
         if converter and converter not in _FLASK_TYPE_MAP:
-            issues.append(
-                f"Unsupported Flask path converter '{converter}' for parameter '{param_name}'; defaulted to str."
-            )
+            unsupported.append(f"path converter: {converter}")
         path_params[param_name] = _FLASK_TYPE_MAP.get(converter or "string", "str")
         return "{" + param_name + "}"
 
-    return _FLASK_PATH_PARAM_RE.sub(_replace, flask_path), path_params, issues
+    return _FLASK_PATH_PARAM_RE.sub(_replace, flask_path), path_params, unsupported
 
 
 def _extract_query_params(
@@ -219,10 +226,10 @@ def _build_function_body(
     if handler_node is None:
         return (
             [
-                "    # TODO: migrate handler body manually.",
+                "    # TODO(migration): unsupported pattern",
                 '    return {"status": "stub"}',
             ],
-            ["Handler body was not found; inserted a stub body."],
+            ["missing handler body"],
             False,
             False,
         )
@@ -243,20 +250,23 @@ def _build_function_body(
     if not transformed_body:
         return (
             [
-                "    # TODO: migrate handler body manually.",
+                "    # TODO(migration): unsupported pattern",
                 '    return {"status": "stub"}',
             ],
-            ["Handler body could not be converted cleanly; inserted a stub body."],
+            ["empty converted body"],
             transformer.uses_http_exception,
             transformer.uses_json_response,
         )
 
     body_lines: list[str] = []
+    unsupported = list(transformer.issues)
+    if unsupported:
+        body_lines.append("    # TODO(migration): unsupported pattern")
     for statement in transformed_body:
         rendered_statement = ast.unparse(statement)
         body_lines.extend(_indent_lines(rendered_statement))
 
-    return body_lines, transformer.issues, transformer.uses_http_exception, transformer.uses_json_response
+    return body_lines, unsupported, transformer.uses_http_exception, transformer.uses_json_response
 
 
 def _indent_lines(block: str) -> list[str]:
@@ -374,6 +384,9 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
         )
 
     def visit_Call(self, node: ast.Call) -> ast.expr:
+        unsupported_pattern = self._unsupported_call_pattern(node)
+        if unsupported_pattern is not None:
+            self.issues.append(unsupported_pattern)
         request_arg = _parse_request_args_get(node)
         if request_arg is not None:
             query_key, _ = request_arg
@@ -381,13 +394,18 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
             return ast.copy_location(ast.Name(id=param_name, ctx=ast.Load()), node)
         return self.generic_visit(node)
 
+    def visit_Name(self, node: ast.Name) -> ast.Name:
+        if node.id == "session":
+            self.issues.append("session usage")
+        return node
+
     def _abort_status(self, node: ast.expr) -> ast.expr | None:
         if not isinstance(node, ast.Call):
             return None
         if not isinstance(node.func, ast.Name) or node.func.id != "abort":
             return None
         if not node.args:
-            self.issues.append("Encountered abort() without a status code; left it for manual migration.")
+            self.issues.append("abort() without status code")
             return None
         return node.args[0]
 
@@ -398,6 +416,18 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
         if jsonify_payload is None:
             return None
         return jsonify_payload, node.elts[1]
+
+    def _unsupported_call_pattern(self, node: ast.Call) -> str | None:
+        if isinstance(node.func, ast.Attribute):
+            if (
+                node.func.attr == "get"
+                and isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "form"
+                and isinstance(node.func.value.value, ast.Name)
+                and node.func.value.value.id == "request"
+            ):
+                return "request.form"
+        return None
 
 
 def _build_fastapi_app(
@@ -434,16 +464,7 @@ def _build_fastapi_app(
 
     if routes:
         for route in routes:
-            decorator = _route_decorator(route["fastapi_path"], route["methods"])
-            function_prefix = "async def" if route["is_async"] else "def"
-            lines.extend(
-                [
-                    "",
-                    decorator,
-                    f'{function_prefix} {route["handler"]}({route["signature"]}):',
-                ]
-            )
-            lines.extend(route["body_lines"])
+            lines.extend(["", route["converted_code"]])
     else:
         lines.extend(
             [
@@ -461,6 +482,24 @@ def _route_decorator(path: str, methods: list[str]) -> str:
     if len(methods) == 1 and methods[0].lower() in _FASTAPI_DECORATOR_METHODS:
         return f'@app.{methods[0].lower()}("{path}")'
     return f'@app.api_route("{path}", methods={methods})'
+
+
+def _build_route_code(
+    path: str,
+    methods: list[str],
+    handler: str,
+    signature: str,
+    body_lines: list[str],
+    is_async: bool,
+) -> str:
+    decorator = _route_decorator(path, methods)
+    function_prefix = "async def" if is_async else "def"
+    lines = [
+        decorator,
+        f"{function_prefix} {handler}({signature}):",
+    ]
+    lines.extend(body_lines)
+    return "\n".join(lines)
 
 
 def _unique_strings(values: list[str]) -> list[str]:

@@ -7,12 +7,56 @@ from typing import Any
 GenerationResult = dict[str, Any]
 ConversionPlan = dict[str, Any]
 RouteInfo = dict[str, Any]
+MigrationReport = dict[str, Any]
 
 _SUPPORTED_FASTAPI_METHODS = {"get", "post", "put", "delete", "patch", "options", "head"}
 _DEFAULT_REQUIREMENTS = [
     "fastapi",
     "uvicorn[standard]",
 ]
+
+
+def build_migration_report(
+    analyzed_routes: list[RouteInfo],
+    converted_routes: list[RouteInfo],
+) -> MigrationReport:
+    """Summarize conversion coverage and unsupported patterns."""
+
+    unsupported_patterns: list[str] = []
+    unconverted_handlers: list[str] = []
+
+    for route in converted_routes:
+        unsupported_patterns.extend(route.get("unsupported", []))
+        if not route.get("converted", False):
+            handler_name = route.get("handler")
+            if handler_name:
+                unconverted_handlers.append(str(handler_name))
+
+    return {
+        "routes_detected": len(analyzed_routes),
+        "routes_converted": sum(1 for route in converted_routes if route.get("converted", False)),
+        "unsupported_patterns": _unique_strings([str(item) for item in unsupported_patterns]),
+        "unconverted_handlers": _unique_strings(unconverted_handlers),
+    }
+
+
+def write_migration_report(
+    out_dir: str | Path,
+    analyzed_routes: list[RouteInfo],
+    converted_routes: list[RouteInfo],
+    *,
+    filename: str = "MIGRATION_REPORT.json",
+) -> Path:
+    """Write a migration report JSON file to the output directory."""
+
+    output_root = Path(out_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+    report_path = output_root / filename
+    report_path.write_text(
+        json.dumps(build_migration_report(analyzed_routes, converted_routes), indent=2),
+        encoding="utf-8",
+    )
+    return report_path
 
 
 def generate_fastapi_project(
@@ -92,6 +136,11 @@ def _build_main_module(routes: list[RouteInfo]) -> str:
         return "\n".join(lines) + "\n"
 
     for route in routes:
+        converted_code = route.get("converted_code")
+        if converted_code and route.get("converted", True):
+            lines.extend(["", str(converted_code)])
+            continue
+
         path = route.get("fastapi_path") or route.get("path") or route.get("source_path") or "/"
         methods = route.get("methods") or ["GET"]
         handler = route.get("handler") or "generated_handler"
@@ -134,3 +183,14 @@ def _write_output_file(output_root: Path, relative_path: str, content: str) -> s
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(content, encoding="utf-8")
     return file_path.relative_to(output_root).as_posix()
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    unique_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique_values.append(value)
+    return unique_values
