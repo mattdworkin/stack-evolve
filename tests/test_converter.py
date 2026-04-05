@@ -70,7 +70,7 @@ def test_convert_flask_to_fastapi_with_mock_routes_input():
             "fastapi_path": "/users/{id}",
             "methods": ["GET"],
             "handler": "get_user",
-            "converted_code": '@app.get("/users/{id}")\ndef get_user(user_id, q: Optional[str] = None):\n    if user_id < 0:\n        raise HTTPException(status_code=404)\n    return JSONResponse(content={\'user_id\': user_id, \'q\': q}, status_code=200)',
+            "converted_code": '@app.get("/users/{id}")\ndef get_user(id: int, q: Optional[str] = None):\n    if id < 0:\n        raise HTTPException(status_code=404)\n    return JSONResponse(content={\'user_id\': id, \'q\': q}, status_code=200)',
             "converted": True,
             "unsupported": [],
         },
@@ -124,5 +124,84 @@ def test_convert_flask_to_fastapi_marks_unsupported_patterns(monkeypatch):
             "converted_code": '@app.post("/submit")\ndef submit_form():\n    # TODO(migration): unsupported pattern\n    name = request.form.get(\'name\')\n    return {\'name\': name}',
             "converted": False,
             "unsupported": ["request.form"],
+        }
+    ]
+
+
+def test_convert_flask_to_fastapi_converts_jsonify_tuple_status_code(monkeypatch):
+    handler_source = "\n".join(
+        [
+            "def create_user():",
+            "    data = {'ok': True}",
+            "    return jsonify(data), 201",
+        ]
+    )
+    handler_node = ast.parse(handler_source).body[0]
+
+    def fake_build_handler_index(search_root, routes):
+        return {("app.py", "create_user"): handler_node}
+
+    monkeypatch.setattr(flask_to_fastapi, "_build_handler_index", fake_build_handler_index)
+
+    conversion_plan = convert_flask_to_fastapi(
+        "sample_apps/flask_simple",
+        [
+            {
+                "path": "/users",
+                "methods": ["POST"],
+                "handler": "create_user",
+                "file": "app.py",
+            }
+        ],
+    )
+
+    assert conversion_plan["routes"] == [
+        {
+            "original_path": "/users",
+            "fastapi_path": "/users",
+            "methods": ["POST"],
+            "handler": "create_user",
+            "converted_code": '@app.post("/users")\ndef create_user():\n    data = {\'ok\': True}\n    return JSONResponse(content=data, status_code=201)',
+            "converted": True,
+            "unsupported": [],
+        }
+    ]
+
+
+def test_convert_flask_to_fastapi_marks_unsupported_path_converters(monkeypatch):
+    handler_source = "\n".join(
+        [
+            "def get_user(user_id):",
+            '    return jsonify({"user_id": user_id})',
+        ]
+    )
+    handler_node = ast.parse(handler_source).body[0]
+
+    def fake_build_handler_index(search_root, routes):
+        return {("app.py", "get_user"): handler_node}
+
+    monkeypatch.setattr(flask_to_fastapi, "_build_handler_index", fake_build_handler_index)
+
+    conversion_plan = convert_flask_to_fastapi(
+        "sample_apps/flask_simple",
+        [
+            {
+                "path": "/users/<custom:user_id>",
+                "methods": ["GET"],
+                "handler": "get_user",
+                "file": "app.py",
+            }
+        ],
+    )
+
+    assert conversion_plan["routes"] == [
+        {
+            "original_path": "/users/<custom:user_id>",
+            "fastapi_path": "/users/{user_id}",
+            "methods": ["GET"],
+            "handler": "get_user",
+            "converted_code": '@app.get("/users/{user_id}")\ndef get_user(user_id: str):\n    # TODO(migration): unsupported pattern\n    return {\'user_id\': user_id}',
+            "converted": False,
+            "unsupported": ["path converter: custom"],
         }
     ]

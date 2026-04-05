@@ -103,12 +103,19 @@ def _convert_route(
 ) -> RouteInfo:
     fastapi_path, path_params, path_unsupported = _convert_flask_path(route["path"])
     query_params = _extract_query_params(handler_node)
-    signature, uses_optional = _build_signature(handler_node, path_params, query_params)
+    signature, uses_optional, name_rewrites = _build_signature(
+        handler_node,
+        path_params,
+        query_params,
+    )
     body_lines, body_unsupported, uses_http_exception, uses_json_response = _build_function_body(
         handler_node,
         query_params,
+        name_rewrites,
     )
     unsupported = _unique_strings(path_unsupported + body_unsupported)
+    if unsupported:
+        body_lines = _ensure_todo_marker(body_lines)
     converted = not unsupported
     converted_code = _build_route_code(
         fastapi_path,
@@ -145,7 +152,11 @@ def _convert_flask_path(flask_path: str) -> tuple[str, dict[str, str], list[str]
         path_params[param_name] = _FLASK_TYPE_MAP.get(converter or "string", "str")
         return "{" + param_name + "}"
 
-    return _FLASK_PATH_PARAM_RE.sub(_replace, flask_path), path_params, unsupported
+    fastapi_path = _FLASK_PATH_PARAM_RE.sub(_replace, flask_path)
+    if "<" in fastapi_path or ">" in fastapi_path:
+        unsupported.append("route path pattern")
+
+    return fastapi_path, path_params, unsupported
 
 
 def _extract_query_params(
@@ -180,23 +191,39 @@ def _build_signature(
     handler_node: ast.FunctionDef | ast.AsyncFunctionDef | None,
     path_params: dict[str, str],
     query_params: list[dict[str, str | None]],
-) -> tuple[str, bool]:
+) -> tuple[str, bool, dict[str, str]]:
     query_param_index = {param["name"]: param for param in query_params}
     signature_parts: list[str] = []
     uses_optional = False
+    name_rewrites: dict[str, str] = {}
+    matched_path_params: set[str] = set()
 
     original_args: list[str] = []
     if handler_node is not None:
         original_args = [arg.arg for arg in handler_node.args.args]
 
+    unmatched_path_params = [
+        (param_name, param_type)
+        for param_name, param_type in path_params.items()
+        if param_name not in original_args
+    ]
+
     for arg_name in original_args:
         if arg_name in path_params:
+            matched_path_params.add(arg_name)
             signature_parts.append(f"{arg_name}: {path_params[arg_name]}")
             continue
 
         if arg_name in query_param_index:
             signature_parts.append(_query_signature_part(query_param_index[arg_name]))
             uses_optional = True
+            continue
+
+        if unmatched_path_params:
+            path_name, path_type = unmatched_path_params.pop(0)
+            matched_path_params.add(path_name)
+            name_rewrites[arg_name] = path_name
+            signature_parts.append(f"{path_name}: {path_type}")
             continue
 
         signature_parts.append(arg_name)
@@ -210,8 +237,13 @@ def _build_signature(
     if handler_node is None:
         for param_name, param_type in path_params.items():
             signature_parts.append(f"{param_name}: {param_type}")
+    else:
+        for param_name, param_type in path_params.items():
+            if param_name in matched_path_params:
+                continue
+            signature_parts.append(f"{param_name}: {param_type}")
 
-    return ", ".join(signature_parts), uses_optional
+    return ", ".join(signature_parts), uses_optional, name_rewrites
 
 
 def _query_signature_part(query_param: dict[str, str | None]) -> str:
@@ -222,6 +254,7 @@ def _query_signature_part(query_param: dict[str, str | None]) -> str:
 def _build_function_body(
     handler_node: ast.FunctionDef | ast.AsyncFunctionDef | None,
     query_params: list[dict[str, str | None]],
+    name_rewrites: dict[str, str],
 ) -> tuple[list[str], list[str], bool, bool]:
     if handler_node is None:
         return (
@@ -234,7 +267,7 @@ def _build_function_body(
             False,
         )
 
-    transformer = _FlaskBodyTransformer(query_params)
+    transformer = _FlaskBodyTransformer(query_params, name_rewrites)
     transformed_body: list[ast.stmt] = []
     for statement in handler_node.body:
         updated_statement = transformer.visit(statement)
@@ -267,6 +300,13 @@ def _build_function_body(
         body_lines.extend(_indent_lines(rendered_statement))
 
     return body_lines, unsupported, transformer.uses_http_exception, transformer.uses_json_response
+
+
+def _ensure_todo_marker(body_lines: list[str]) -> list[str]:
+    todo_marker = "    # TODO(migration): unsupported pattern"
+    if body_lines and body_lines[0] == todo_marker:
+        return body_lines
+    return [todo_marker, *body_lines]
 
 
 def _indent_lines(block: str) -> list[str]:
@@ -324,13 +364,18 @@ def _abort_exception_call(status_code: ast.expr) -> ast.Call:
 
 
 class _FlaskBodyTransformer(ast.NodeTransformer):
-    def __init__(self, query_params: list[dict[str, str | None]]) -> None:
+    def __init__(
+        self,
+        query_params: list[dict[str, str | None]],
+        name_rewrites: dict[str, str],
+    ) -> None:
         self.query_params = {param["name"]: param for param in query_params}
         self.query_keys = {
             param["query_key"]: param["name"]
             for param in query_params
             if param["query_key"] is not None
         }
+        self.name_rewrites = name_rewrites
         self.uses_http_exception = False
         self.uses_json_response = False
         self.issues: list[str] = []
@@ -374,6 +419,9 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
                 node,
             )
 
+        if isinstance(node.value, ast.Tuple):
+            self.issues.append("response tuple")
+
         jsonify_payload = _extract_jsonify_payload(node.value)
         if jsonify_payload is not None:
             return ast.copy_location(ast.Return(value=self.visit(jsonify_payload)), node)
@@ -387,6 +435,8 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
         unsupported_pattern = self._unsupported_call_pattern(node)
         if unsupported_pattern is not None:
             self.issues.append(unsupported_pattern)
+        if isinstance(node.func, ast.Name) and node.func.id == "jsonify":
+            self.issues.append("jsonify call")
         request_arg = _parse_request_args_get(node)
         if request_arg is not None:
             query_key, _ = request_arg
@@ -397,6 +447,11 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
     def visit_Name(self, node: ast.Name) -> ast.Name:
         if node.id == "session":
             self.issues.append("session usage")
+        if node.id in self.name_rewrites:
+            return ast.copy_location(
+                ast.Name(id=self.name_rewrites[node.id], ctx=node.ctx),
+                node,
+            )
         return node
 
     def _abort_status(self, node: ast.expr) -> ast.expr | None:
