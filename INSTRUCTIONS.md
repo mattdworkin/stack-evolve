@@ -78,7 +78,7 @@ out_fastapi/
   conversion_plan.json
   generation_summary.json
   app.py
-  migration_report.json
+  MIGRATION_REPORT.json
 ```
 
 To test the non-Flask failure path:

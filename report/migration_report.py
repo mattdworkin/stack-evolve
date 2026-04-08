@@ -69,29 +69,17 @@ def generate_fastapi_project(
     output_root.mkdir(parents=True, exist_ok=True)
 
     normalized_plan = _normalize_conversion_plan(conversion_plan)
-    main_content = _resolve_main_content(normalized_plan)
+    main_content = _build_main_module(normalized_plan.get("routes", []))
     requirements_content = _build_requirements_file(normalized_plan)
 
     written_files: list[str] = []
     written_files.append(_write_output_file(output_root, "main.py", main_content))
     written_files.append(_write_output_file(output_root, "requirements.txt", requirements_content))
 
-    routes = normalized_plan.get("routes", [])
-    report_payload = {
-        "summary": "FastAPI scaffold generated.",
-        "route_count": len(routes),
-        "notes": normalized_plan.get("notes", []),
-        "entrypoint": "uvicorn main:app --reload",
-        "generated_files": ["main.py", "requirements.txt"],
-    }
-    report_path = output_root / "migration_report.json"
-    report_path.write_text(json.dumps(report_payload, indent=2), encoding="utf-8")
-    written_files.append(report_path.relative_to(output_root).as_posix())
-
     return {
         "output_dir": str(output_root),
         "written_files": written_files,
-        "report": report_payload,
+        "entrypoint": "uvicorn main:app --reload",
     }
 
 
@@ -108,23 +96,28 @@ def _normalize_conversion_plan(
     return conversion_plan
 
 
-def _resolve_main_content(conversion_plan: ConversionPlan) -> str:
-    generated_files = conversion_plan.get("generated_files", {})
-    if "main.py" in generated_files:
-        return generated_files["main.py"]
-    if "app.py" in generated_files:
-        return generated_files["app.py"]
-    return _build_main_module(conversion_plan.get("routes", []))
-
-
 def _build_main_module(routes: list[RouteInfo]) -> str:
-    lines = [
-        "from fastapi import FastAPI",
-        "",
-        'app = FastAPI(title="Migrated Flask App")',
-    ]
+    converted_routes = [route for route in routes if route.get("converted", True)]
+    lines: list[str] = []
 
-    if not routes:
+    if any("Optional[" in str(route.get("converted_code", "")) for route in converted_routes):
+        lines.extend(
+            [
+                "from typing import Optional",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "from fastapi import FastAPI, HTTPException",
+            "from fastapi.responses import JSONResponse",
+            "",
+            "app = FastAPI()",
+        ]
+    )
+
+    if not converted_routes:
         lines.extend(
             [
                 "",
@@ -135,9 +128,9 @@ def _build_main_module(routes: list[RouteInfo]) -> str:
         )
         return "\n".join(lines) + "\n"
 
-    for route in routes:
+    for route in converted_routes:
         converted_code = route.get("converted_code")
-        if converted_code and route.get("converted", True):
+        if converted_code:
             lines.extend(["", str(converted_code)])
             continue
 
