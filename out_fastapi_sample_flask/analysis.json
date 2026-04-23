@@ -1,0 +1,10 @@
+[
+  {
+    "path": "/",
+    "methods": [
+      "GET"
+    ],
+    "handler": "hello_world",
+    "file": "app.py"
+  }
+]

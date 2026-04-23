@@ -1,0 +1,26 @@
+{
+  "source_repo": "..\\..\\Project_Samples\\sample-flask",
+  "route_count": 1,
+  "routes": [
+    {
+      "original_path": "/",
+      "fastapi_path": "/",
+      "methods": [
+        "GET"
+      ],
+      "handler": "hello_world",
+      "converted_code": "@app.get(\"/\")\ndef hello_world():\n    # TODO(migration): unsupported pattern\n    return render_template('index.html')",
+      "converted": false,
+      "unsupported": [
+        "render_template"
+      ]
+    }
+  ],
+  "notes": [
+    "Converted Flask route decorators into FastAPI route definitions.",
+    "render_template"
+  ],
+  "generated_files": {
+    "app.py": "from fastapi import FastAPI\n\napp = FastAPI(title=\"Migrated Flask App\")\n\n@app.get(\"/\")\ndef hello_world():\n    # TODO(migration): unsupported pattern\n    return render_template('index.html')\n"
+  }
+}

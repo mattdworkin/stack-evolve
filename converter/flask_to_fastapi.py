@@ -447,12 +447,22 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
     def visit_Name(self, node: ast.Name) -> ast.Name:
         if node.id == "session":
             self.issues.append("session usage")
+        if node.id == "g":
+            self.issues.append("g usage")
+        if node.id == "current_app":
+            self.issues.append("current_app usage")
         if node.id in self.name_rewrites:
             return ast.copy_location(
                 ast.Name(id=self.name_rewrites[node.id], ctx=node.ctx),
                 node,
             )
         return node
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.Attribute:
+        unsupported_pattern = self._unsupported_attribute_pattern(node)
+        if unsupported_pattern is not None:
+            self.issues.append(unsupported_pattern)
+        return self.generic_visit(node)
 
     def _abort_status(self, node: ast.expr) -> ast.expr | None:
         if not isinstance(node, ast.Call):
@@ -473,6 +483,17 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
         return jsonify_payload, node.elts[1]
 
     def _unsupported_call_pattern(self, node: ast.Call) -> str | None:
+        if isinstance(node.func, ast.Name):
+            if node.func.id == "render_template":
+                return "render_template"
+            if node.func.id == "redirect":
+                return "redirect"
+            if node.func.id == "url_for":
+                return "url_for"
+            if node.func.id == "flash":
+                return "flash"
+            if node.func.id == "make_response":
+                return "make_response"
         if isinstance(node.func, ast.Attribute):
             if (
                 node.func.attr == "get"
@@ -482,6 +503,23 @@ class _FlaskBodyTransformer(ast.NodeTransformer):
                 and node.func.value.value.id == "request"
             ):
                 return "request.form"
+            if (
+                node.func.attr == "get"
+                and isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "files"
+                and isinstance(node.func.value.value, ast.Name)
+                and node.func.value.value.id == "request"
+            ):
+                return "request.files"
+        return None
+
+    def _unsupported_attribute_pattern(self, node: ast.Attribute) -> str | None:
+        if (
+            node.attr == "files"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "request"
+        ):
+            return "request.files"
         return None
 
 
