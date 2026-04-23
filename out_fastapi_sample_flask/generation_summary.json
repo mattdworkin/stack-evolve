@@ -1,0 +1,8 @@
+{
+  "output_dir": "out_fastapi_sample_flask",
+  "written_files": [
+    "main.py",
+    "requirements.txt"
+  ],
+  "entrypoint": "uvicorn main:app --reload"
+}

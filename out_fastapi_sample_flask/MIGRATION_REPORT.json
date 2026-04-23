@@ -1,0 +1,10 @@
+{
+  "routes_detected": 1,
+  "routes_converted": 0,
+  "unsupported_patterns": [
+    "render_template"
+  ],
+  "unconverted_handlers": [
+    "hello_world"
+  ]
+}

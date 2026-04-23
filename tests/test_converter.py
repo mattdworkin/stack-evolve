@@ -128,6 +128,126 @@ def test_convert_flask_to_fastapi_marks_unsupported_patterns(monkeypatch):
     ]
 
 
+def test_convert_flask_to_fastapi_marks_render_template_as_unsupported(monkeypatch):
+    handler_source = "\n".join(
+        [
+            "def hello_world():",
+            '    return render_template("index.html")',
+        ]
+    )
+    handler_node = ast.parse(handler_source).body[0]
+
+    def fake_build_handler_index(search_root, routes):
+        return {("app.py", "hello_world"): handler_node}
+
+    monkeypatch.setattr(flask_to_fastapi, "_build_handler_index", fake_build_handler_index)
+
+    conversion_plan = convert_flask_to_fastapi(
+        "sample_apps/flask_simple",
+        [
+            {
+                "path": "/",
+                "methods": ["GET"],
+                "handler": "hello_world",
+                "file": "app.py",
+            }
+        ],
+    )
+
+    assert conversion_plan["routes"] == [
+        {
+            "original_path": "/",
+            "fastapi_path": "/",
+            "methods": ["GET"],
+            "handler": "hello_world",
+            "converted_code": '@app.get("/")\ndef hello_world():\n    # TODO(migration): unsupported pattern\n    return render_template(\'index.html\')',
+            "converted": False,
+            "unsupported": ["render_template"],
+        }
+    ]
+
+
+def test_convert_flask_to_fastapi_marks_redirect_and_url_for_as_unsupported(monkeypatch):
+    handler_source = "\n".join(
+        [
+            "def go_home():",
+            "    flash('saved')",
+            "    return redirect(url_for('home'))",
+        ]
+    )
+    handler_node = ast.parse(handler_source).body[0]
+
+    def fake_build_handler_index(search_root, routes):
+        return {("app.py", "go_home"): handler_node}
+
+    monkeypatch.setattr(flask_to_fastapi, "_build_handler_index", fake_build_handler_index)
+
+    conversion_plan = convert_flask_to_fastapi(
+        "sample_apps/flask_simple",
+        [
+            {
+                "path": "/go-home",
+                "methods": ["POST"],
+                "handler": "go_home",
+                "file": "app.py",
+            }
+        ],
+    )
+
+    assert conversion_plan["routes"] == [
+        {
+            "original_path": "/go-home",
+            "fastapi_path": "/go-home",
+            "methods": ["POST"],
+            "handler": "go_home",
+            "converted_code": '@app.post("/go-home")\ndef go_home():\n    # TODO(migration): unsupported pattern\n    flash(\'saved\')\n    return redirect(url_for(\'home\'))',
+            "converted": False,
+            "unsupported": ["flash", "redirect", "url_for"],
+        }
+    ]
+
+
+def test_convert_flask_to_fastapi_marks_request_files_and_context_usage_as_unsupported(monkeypatch):
+    handler_source = "\n".join(
+        [
+            "def upload():",
+            "    file = request.files.get('photo')",
+            "    current_app.logger.info(g.user)",
+            "    return jsonify({'filename': file.filename if file else None})",
+        ]
+    )
+    handler_node = ast.parse(handler_source).body[0]
+
+    def fake_build_handler_index(search_root, routes):
+        return {("app.py", "upload"): handler_node}
+
+    monkeypatch.setattr(flask_to_fastapi, "_build_handler_index", fake_build_handler_index)
+
+    conversion_plan = convert_flask_to_fastapi(
+        "sample_apps/flask_simple",
+        [
+            {
+                "path": "/upload",
+                "methods": ["POST"],
+                "handler": "upload",
+                "file": "app.py",
+            }
+        ],
+    )
+
+    assert conversion_plan["routes"] == [
+        {
+            "original_path": "/upload",
+            "fastapi_path": "/upload",
+            "methods": ["POST"],
+            "handler": "upload",
+            "converted_code": '@app.post("/upload")\ndef upload():\n    # TODO(migration): unsupported pattern\n    file = request.files.get(\'photo\')\n    current_app.logger.info(g.user)\n    return {\'filename\': file.filename if file else None}',
+            "converted": False,
+            "unsupported": ["request.files", "current_app usage", "g usage"],
+        }
+    ]
+
+
 def test_convert_flask_to_fastapi_converts_jsonify_tuple_status_code(monkeypatch):
     handler_source = "\n".join(
         [

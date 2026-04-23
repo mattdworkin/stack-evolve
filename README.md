@@ -13,7 +13,7 @@ git clone https://github.com/mattdworkin/stack-evolve
 After cloning, install required dependencies:
 
 ```bash
-python3 -m pip install typer pytest
+python -m pip install typer pytest
 ```
 ## Project Structure
 The project is organized into the following folders:
@@ -69,12 +69,12 @@ Analyzer output uses this shared contract:
 
 ### Convert a Repository
 ```
-python3 cli.py convert <repo_path> --out <output_directory>
+python cli.py convert <repo_path> --out <output_directory>
 ```
 Use this to test sample_application in repo:
 
 ```bash
-python3 cli.py convert sample_apps/flask_simple --out out_fastapi
+python cli.py convert sample_apps/flask_simple --out out_fastapi
 ```
 This command now runs the full pipeline:
 
@@ -132,13 +132,18 @@ You can run the generated app with:
 
 ```bash
 cd out_fastapi
+python -m pip install -r requirements.txt
 uvicorn main:app --reload
 ```
+
+Routes marked with `route["converted"] == false` are reported in `MIGRATION_REPORT.json`
+and are excluded from the generated runnable FastAPI app. If no routes are fully
+converted, the generator writes a safe fallback root route so `main.py` still runs.
 
 To test the non-Flask failure path:
 
 ```bash
-python3 cli.py convert sample_apps/non_flask_simple/app.py --out out_fastapi
+python cli.py convert sample_apps/non_flask_simple/app.py --out out_fastapi
 ```
 
 That command should exit with code `1`, write `detection.json`, and stop before analysis.
@@ -190,17 +195,17 @@ Current converter coverage includes:
 From the root of the project directory, run:
 
 ```bash
-python3 -m pytest
+python -m pytest
 ```
 
 To run only the new convert pipeline tests:
 
 ```bash
-python3 -m pytest tests/test_cli_convert.py
+python -m pytest tests/test_cli_convert.py
 ```
 
 To run the CLI, generator, converter, and report tests together:
 
 ```bash
-python3 -m pytest tests/test_cli_convert.py tests/test_generator.py tests/test_converter.py tests/test_migration_report.py
+python -m pytest tests/test_cli_convert.py tests/test_generator.py tests/test_converter.py tests/test_migration_report.py
 ```

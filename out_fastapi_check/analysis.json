@@ -1,0 +1,18 @@
+[
+  {
+    "path": "/health",
+    "methods": [
+      "GET"
+    ],
+    "handler": "health",
+    "file": "app.py"
+  },
+  {
+    "path": "/users/<int:user_id>",
+    "methods": [
+      "GET"
+    ],
+    "handler": "get_user",
+    "file": "app.py"
+  }
+]
